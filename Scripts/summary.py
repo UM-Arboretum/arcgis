@@ -1,10 +1,11 @@
-
+#!/usr/bin/env python3
 """
 summary.py
 
 Generates summary CSVs for Dendrometer and TMS,
 merges them into your JOINED.*.csv metadata files,
-and also produces daily summaries per sensor.
+produces daily summaries per sensor,
+and computes DBH differences.
 
 These files will be used in ArcGIS Online to build our Story.
 """
@@ -16,16 +17,21 @@ import pandas as pd
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 
-DENDRO_DATA_DIR     = "Dendrometer_Data"
-TMS_DATA_DIR        = "TMS_Data"
+DENDRO_DATA_DIR        = "Dendrometer_Data"
+TMS_DATA_DIR           = "TMS_Data"
 
-JOINED_DENDRO_CSV   = "JOINED.DENDROMETER.csv"
-JOINED_TMS_CSV      = "JOINED.TMS.csv"
+JOINED_DENDRO_CSV      = "JOINED.DENDROMETER.csv"
+JOINED_TMS_CSV         = "JOINED.TMS.csv"
 
-OUTPUT_DENDRO       = "Dendrometer_Average.csv"
-OUTPUT_TMS          = "TMS_Average.csv"
-OUTPUT_DENDRO_DAILY = "Dendrometer_Daily.csv"
-OUTPUT_TMS_DAILY    = "TMS_Daily.csv"
+OUTPUT_DENDRO          = "Dendrometer_Average.csv"
+OUTPUT_TMS             = "TMS_Average.csv"
+OUTPUT_DENDRO_DAILY    = "Dendrometer_Daily.csv"
+OUTPUT_TMS_DAILY       = "TMS_Daily.csv"
+
+
+START_DBH_CSV          = "Dendrometer_Start_DBH.csv"
+OUTPUT_DBH_DF          = "Dendrometer_DBH_Raw.csv"       
+OUTPUT_DBH_MERGED      = "Dendrometer_DBH_Difference.csv"
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 
@@ -63,7 +69,7 @@ def summarize_folder(data_dir, metrics, sep=';', verbose=True):
 def daily_summary(data_dir, metrics, sep=';', verbose=True):
     """
     Compute daily mean metrics per sensor.
-    Returns a DataFrame with columns: sensor_id, date, <metrics>
+    Returns DataFrame: sensor_id, date, <metrics>
     """
     dfs = []
     pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
@@ -82,7 +88,6 @@ def daily_summary(data_dir, metrics, sep=';', verbose=True):
             if verbose: print(f"⚠️  {fname} only has {df.shape[1]} cols—skipping")
             continue
 
-        # Extract timestamp and metrics
         data = df.iloc[:, [1] + list(metrics.values())].copy()
         data.columns = ['timestamp'] + list(metrics.keys())
         data['sensor_id'] = sensor_id
@@ -92,7 +97,9 @@ def daily_summary(data_dir, metrics, sep=';', verbose=True):
         return pd.DataFrame()
 
     all_data = pd.concat(dfs, ignore_index=True)
-    all_data['timestamp'] = pd.to_datetime(all_data['timestamp'], format="%Y.%m.%d %H:%M", errors='coerce')
+    all_data['timestamp'] = pd.to_datetime(
+        all_data['timestamp'], format="%Y.%m.%d %H:%M", errors='coerce'
+    )
     all_data['date'] = all_data['timestamp'].dt.date
 
     daily = (
@@ -104,6 +111,38 @@ def daily_summary(data_dir, metrics, sep=';', verbose=True):
     if verbose:
         print(f"  • aggregated to {len(daily)} daily rows")
     return daily
+
+def compute_dbh_df(dendro_dir, start_dbh_path, sep=';', verbose=True):
+    """
+    Returns DataFrame with columns: sensor_id, start_DBH, end_DBH, dbh_diff
+    """
+    dbh_df = pd.read_csv(start_dbh_path)
+    if 'ID' not in dbh_df.columns or 'start_DBH' not in dbh_df.columns:
+        raise ValueError("START_DBH_CSV must have columns ID and start_DBH")
+    records = []
+    pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
+    for path in glob.glob(os.path.join(dendro_dir, "data_*.csv")):
+        fname = os.path.basename(path)
+        m = pattern.match(fname)
+        if not m:
+            continue
+        sid = int(m.group(1))
+        raw = pd.read_csv(path, header=None, sep=sep, engine='python')
+        if raw.empty or raw.shape[1] < 7:
+            continue
+        last_size = float(raw.iloc[-1, 6])
+        start_val = float(dbh_df.loc[dbh_df['ID'] == sid, 'start_DBH'].iloc[0])
+        end_val = start_val + (last_size / 10000) * 2
+        dbh_diff = end_val - start_val
+        records.append({
+            'sensor_id': sid,
+            'start_DBH': round(start_val, 2),
+            'end_DBH': round(end_val, 2),
+            'dbh_diff': round(dbh_diff, 2)
+        })
+    if verbose:
+        print(f"  • computed DBH for {len(records)} sensors")
+    return pd.DataFrame(records)
 
 # ─── DENDROMETER OVERALL ───────────────────────────────────────────────────────
 
@@ -125,10 +164,9 @@ df_dendro_out.to_csv(OUTPUT_DENDRO, index=False)
 
 print("🔄 Building daily dendrometer summaries…")
 dendro_daily = daily_summary(DENDRO_DATA_DIR, dendro_metrics)
-# keep only sensor_id, date, metrics, then merge location/metadata
 meta_sel = df_meta_d[['sensor_id','X','Y','Common_Name']]
-
 df_dendro_daily = dendro_daily.merge(meta_sel, on='sensor_id', how='left')
+
 print(f"🔄 Writing output to {OUTPUT_DENDRO_DAILY}")
 df_dendro_daily.to_csv(OUTPUT_DENDRO_DAILY, index=False)
 
@@ -153,9 +191,22 @@ df_tms_out.to_csv(OUTPUT_TMS, index=False)
 print("🔄 Building daily TMS summaries…")
 tms_daily = daily_summary(TMS_DATA_DIR, tms_metrics)
 meta_sel_t = df_meta_t[['sensor_id','X','Y','Common_Name']]
-
 df_tms_daily = tms_daily.merge(meta_sel_t, on='sensor_id', how='left')
+
 print(f"🔄 Writing output to {OUTPUT_TMS_DAILY}")
 df_tms_daily.to_csv(OUTPUT_TMS_DAILY, index=False)
 
-print("✅ Done.")
+# ─── DBH DIFFERENCE ───────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    print("🔄 Computing DBH raw values...")
+    df_dbh = compute_dbh_df(DENDRO_DATA_DIR, START_DBH_CSV)
+    df_dbh.to_csv(OUTPUT_DBH_DF, index=False)
+    print(f"  • wrote raw DBH to {OUTPUT_DBH_DF}")
+    
+    # Merge DBH with metadata
+    df_dbh_merged = df_meta_d.merge(df_dbh, on='sensor_id', how='left')
+    df_dbh_merged.to_csv(OUTPUT_DBH_MERGED, index=False)
+    print(f"🔄 Merging DBH difference to {OUTPUT_DBH_MERGED}")
+
+    print("✅ All is done! :)")

@@ -14,7 +14,7 @@ from arcgis.features import FeatureLayerCollection
 load_dotenv()
 
 # ─── STEP 0: regenerate your CSVs ───────────────────────────────────────────────
-subprocess.check_call(["python", "scripts/summary.py"])
+subprocess.check_call(["python", "Scripts/summary.py"])
 
 # ─── STEP 1: authenticate ───────────────────────────────────────────────────────
 gis = GIS(
@@ -27,7 +27,8 @@ gis = GIS(
 layer_map = {
     "Dendrometer_Average.csv": os.environ["DENDRO_AVG_ITEMID"],
     "Dendrometer_Daily.csv":   os.environ["DENDRO_DAILY_ITEMID"],
-    "TMS_Average.csv":         os.environ["TMS_AVG_ITEMID"]
+    "TMS_Average.csv":         os.environ["TMS_AVG_ITEMID"],
+    "Dendrometer_DBH_Difference.csv":  os.environ["DBH_ITEMID"]
 }
 
 # ─── STEP 3: overwrite each layer ───────────────────────────────────────────────
