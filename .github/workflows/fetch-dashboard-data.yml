@@ -20,7 +20,7 @@ jobs:
         env:
           DASHBOARD_PAT: ${{ secrets.DASHBOARD_PAT }}
         run: |
-          git clone https://x-access-token:${DASHBOARD_PAT}@github.com/danielaggwm/arboretum.git dashboard
+          git clone https://x-access-token:${DASHBOARD_PAT}@github.com/UM-Arboretum/dashboard.git dashboard
           rm -rf TMS_Data Dendrometer_Data
           cp -r dashboard/D3_Dynamic_Plots/TMS_Data          TMS_Data
           cp -r dashboard/D3_Dynamic_Plots/Dendrometer_Data Dendrometer_Data
