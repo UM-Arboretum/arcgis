@@ -1,0 +1,40 @@
+name: Update Layers on Data Change
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'TMS_Data/**'
+      - 'Dendrometer_Data/**'
+  repository_dispatch:
+    types: [run-update-layers]
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run update_layers.py
+        env:
+          AGO_ORG_URL:        ${{ secrets.AGO_ORG_URL }}
+          AGO_USERNAME:       ${{ secrets.AGO_USERNAME }}
+          AGO_PASSWORD:       ${{ secrets.AGO_PASSWORD }}
+          DENDRO_AVG_ITEMID:  ${{ secrets.DENDRO_AVG_ITEMID }}
+          DENDRO_DAILY_ITEMID: ${{ secrets.DENDRO_DAILY_ITEMID }}
+          TMS_AVG_ITEMID:     ${{ secrets.TMS_AVG_ITEMID }}
+          DBH_ITEMID:         ${{ secrets.DBH_ITEMID }}
+        run: |
+          python Scripts/update_layers.py
