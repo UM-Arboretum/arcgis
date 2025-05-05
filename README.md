@@ -26,7 +26,7 @@ Changes made to the dashboard repository (⁠ arboretum ⁠) will automatica
 
 Steps:
 
-•⁠  ⁠New data is committed to the [Dashboard repo](https://github.com/danielaggwm/arboretum).
+•⁠  ⁠New data is committed to the [Dashboard repo](https://github.com/UM-Arboretum/dashboard).
 
 •⁠  ⁠That triggers a ⁠ repository_dispatch ⁠ to this repo (⁠ dashboard-data-updated ⁠).
 
