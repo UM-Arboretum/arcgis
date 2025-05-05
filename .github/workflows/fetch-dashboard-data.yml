@@ -1,0 +1,40 @@
+name: Fetch Dashboard Data
+
+on:
+  workflow_dispatch:           # allows manual runs
+  repository_dispatch:
+    types: [dashboard-data-updated]
+
+permissions:
+  contents: write   # so we can commit the new folders
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout ArcGIS repository
+        uses: actions/checkout@v4
+
+      - name: Pull latest data from Dashboard repo
+        env:
+          DASHBOARD_PAT: ${{ secrets.DASHBOARD_PAT }}
+        run: |
+          git clone https://x-access-token:${DASHBOARD_PAT}@github.com/danielaggwm/arboretum.git dashboard
+          rm -rf TMS_Data Dendrometer_Data
+          cp -r dashboard/D3_Dynamic_Plots/TMS_Data          TMS_Data
+          cp -r dashboard/D3_Dynamic_Plots/Dendrometer_Data Dendrometer_Data
+
+      - name: Commit updated data folders
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git add TMS_Data Dendrometer_Data
+          git commit -m "🔄 Sync data from Dashboard repo" || echo "No changes to commit"
+          git push
+
+      - name: Trigger update_layers workflow
+        uses: peter-evans/repository-dispatch@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          event-type: run-update-layers
