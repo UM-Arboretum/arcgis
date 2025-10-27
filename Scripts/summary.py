@@ -51,7 +51,8 @@ def summarize_folder(data_dir, metrics, sep=';', verbose=True):
             continue
         sensor_id = int(m.group(1))
 
-        df = pd.read_csv(path, header=None, sep=sep, engine='python')
+        # df = pd.read_csv(path, header=None, sep=sep, engine='python')
+        df = pd.read_csv(path, header=None, sep=sep, engine='python', encoding='latin1')
         if df.shape[1] <= max(metrics.values()):
             if verbose: print(f"⚠️  {fname} only has {df.shape[1]} cols—skipping")
             continue
@@ -83,7 +84,8 @@ def daily_summary(data_dir, metrics, sep=';', verbose=True):
             continue
         sensor_id = int(m.group(1))
 
-        df = pd.read_csv(path, header=None, sep=sep, engine='python')
+        # df = pd.read_csv(path, header=None, sep=sep, engine='python')
+        df = pd.read_csv(path, header=None, sep=sep, engine='python', encoding='latin1')
         if df.shape[1] <= max(metrics.values()) or df.shape[1] <= 1:
             if verbose: print(f"⚠️  {fname} only has {df.shape[1]} cols—skipping")
             continue
