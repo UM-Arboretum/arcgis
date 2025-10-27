@@ -35,9 +35,6 @@ OUTPUT_DBH_MERGED      = "Dendrometer_DBH_Difference.csv"
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
 
 def summarize_folder(data_dir, metrics, sep=';', verbose=True):
-    """
-    Compute overall mean metrics per sensor.
-    """
     records = []
     pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
     paths = glob.glob(os.path.join(data_dir, "data_*.csv"))
@@ -66,10 +63,6 @@ def summarize_folder(data_dir, metrics, sep=';', verbose=True):
 
 
 def daily_summary(data_dir, metrics, sep=';', verbose=True):
-    """
-    Compute daily mean metrics per sensor.
-    Returns DataFrame: sensor_id, date, <metrics>
-    """
     dfs = []
     pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
     paths = glob.glob(os.path.join(data_dir, "data_*.csv"))
@@ -113,12 +106,12 @@ def daily_summary(data_dir, metrics, sep=';', verbose=True):
 
 
 def compute_dbh_df(dendro_dir, start_dbh_path, sep=';', verbose=True):
-    """
-    Returns DataFrame with columns: sensor_id, start_DBH, end_DBH, dbh_diff
-    """
-    dbh_df = pd.read_csv(start_dbh_path, encoding='latin1')
+    # read with utf-8-sig to handle BOM, strip whitespace from columns
+    dbh_df = pd.read_csv(start_dbh_path, encoding='utf-8-sig')
+    dbh_df.columns = dbh_df.columns.str.strip()
+
     if 'ID' not in dbh_df.columns or 'start_DBH' not in dbh_df.columns:
-        raise ValueError("START_DBH_CSV must have columns ID and start_DBH")
+        raise ValueError(f"START_DBH_CSV must have columns ID and start_DBH, got {list(dbh_df.columns)}")
 
     records = []
     pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
@@ -147,6 +140,7 @@ def compute_dbh_df(dendro_dir, start_dbh_path, sep=';', verbose=True):
         print(f"  • computed DBH for {len(records)} sensors")
     return pd.DataFrame(records)
 
+
 # ─── DENDROMETER OVERALL ───────────────────────────────────────────────────────
 
 print("🔄 Summarizing dendrometer data…")
@@ -163,6 +157,7 @@ df_dendro_out = df_meta_d.merge(df_dendro_sum, on='sensor_id', how='left')
 print(f"🔄 Writing output to {OUTPUT_DENDRO}")
 df_dendro_out.to_csv(OUTPUT_DENDRO, index=False)
 
+
 # ─── DENDROMETER DAILY ─────────────────────────────────────────────────────────
 
 print("🔄 Building daily dendrometer summaries…")
@@ -172,6 +167,7 @@ df_dendro_daily = dendro_daily.merge(meta_sel, on='sensor_id', how='left')
 
 print(f"🔄 Writing output to {OUTPUT_DENDRO_DAILY}")
 df_dendro_daily.to_csv(OUTPUT_DENDRO_DAILY, index=False)
+
 
 # ─── TMS OVERALL ───────────────────────────────────────────────────────────────
 
@@ -189,6 +185,7 @@ df_tms_out = df_meta_t.merge(df_tms_sum, on='sensor_id', how='left')
 print(f"🔄 Writing output to {OUTPUT_TMS}")
 df_tms_out.to_csv(OUTPUT_TMS, index=False)
 
+
 # ─── TMS DAILY ─────────────────────────────────────────────────────────────────
 
 print("🔄 Building daily TMS summaries…")
@@ -198,6 +195,7 @@ df_tms_daily = tms_daily.merge(meta_sel_t, on='sensor_id', how='left')
 
 print(f"🔄 Writing output to {OUTPUT_TMS_DAILY}")
 df_tms_daily.to_csv(OUTPUT_TMS_DAILY, index=False)
+
 
 # ─── DBH DIFFERENCE ───────────────────────────────────────────────────
 
