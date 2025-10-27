@@ -11,204 +11,168 @@ These files will be used in ArcGIS Online to build our Story.
 """
 
 import os
-import re
-import glob
 import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import datetime
+from pytz import timezone
 
-# ─── CONFIG ────────────────────────────────────────────────────────────────────
+# -----------------------------
+# Config
+# -----------------------------
+EXTRACT_FOLDER = "./Extracted"
+SUMMARIES_FOLDER = "./Summaries"
+DBH_STATIC_FOLDER = "./DBH_Raw"
+TIMEZONE = timezone("America/New_York")
 
-DENDRO_DATA_DIR        = "Dendrometer_Data"
-TMS_DATA_DIR           = "TMS_Data"
+JOINED_DENDRO_CSV = "./joined_dendro.csv"
+JOINED_TMS_CSV = "./joined_tms.csv"
 
-JOINED_DENDRO_CSV      = "JOINED.DENDROMETER.csv"
-JOINED_TMS_CSV         = "JOINED.TMS.csv"
+def convert_to_eastern(dt_string):
+    dt = datetime.strptime(dt_string, "%Y.%m.%d %H:%M")
+    local_dt = timezone("UTC").localize(dt).astimezone(TIMEZONE)
+    return local_dt.replace(tzinfo=None)
 
-OUTPUT_DENDRO          = "Dendrometer_Average.csv"
-OUTPUT_TMS             = "TMS_Average.csv"
-OUTPUT_DENDRO_DAILY    = "Dendrometer_Daily.csv"
-OUTPUT_TMS_DAILY       = "TMS_Daily.csv"
+# -----------------------------
+# Daily Summary Logic
+# -----------------------------
+def daily_summary(df, station_id, dest_folder):
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"].astype(str), format="%Y.%m.%d %H:%M")
+    df.sort_values("Timestamp", inplace=True)
 
+    df["Date"] = df["Timestamp"].dt.date
 
-START_DBH_CSV          = "Dendrometer_Start_DBH.csv"
-OUTPUT_DBH_DF          = "Dendrometer_DBH_Raw.csv"       
-OUTPUT_DBH_MERGED      = "Dendrometer_DBH_Difference.csv"
+    grouped = df.groupby("Date").agg(
+        T1_Min=("T1", "min"),
+        T1_Max=("T1", "max"),
+        T2_Min=("T2", "min"),
+        T2_Max=("T2", "max"),
+        T3_Min=("T3", "min"),
+        T3_Max=("T3", "max"),
+        Soil_Min=("SM", "min"),
+        Soil_Max=("SM", "max"),
+        Shake_Max=("SH", "max"),
+        Rows=("Timestamp", "count"),
+    ).reset_index()
 
-# ─── HELPERS ───────────────────────────────────────────────────────────────────
+    dest_path = os.path.join(dest_folder, f"{station_id}_daily.csv")
+    grouped.to_csv(dest_path, index=False, encoding="utf-8")
 
-def summarize_folder(data_dir, metrics, sep=';', verbose=True):
-    """
-    Compute overall mean metrics per sensor.
-    """
-    records = []
-    pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
-    paths = glob.glob(os.path.join(data_dir, "data_*.csv"))
+# -----------------------------
+# Summarize each folder file
+# -----------------------------
+def summarize_folder(folder, dest_folder):
+    for root, dirs, files in os.walk(folder):
+        for file in files:
+            if file.endswith(".csv"):
+                full_path = os.path.join(root, file)
 
-    for path in paths:
-        fname = os.path.basename(path)
-        m = pattern.match(fname)
-        if not m:
-            if verbose: print(f"⚠️  skipping unexpected filename: {fname}")
+                try:
+                    df = pd.read_csv(full_path, encoding='latin1')
+                except UnicodeDecodeError:
+                    df = pd.read_csv(full_path, encoding="utf-8", errors="ignore")
+
+                station_id = Path(file).stem.split("_")[0]
+                daily_summary(df, station_id, dest_folder)
+
+# -----------------------------
+# DBH Processing
+# -----------------------------
+def compute_dbh_df(path, sep=";", start_row=1):
+    try:
+        raw = pd.read_csv(path, header=None, sep=sep, engine="python", encoding="latin1")
+    except UnicodeDecodeError:
+        raw = pd.read_csv(path, header=None, sep=sep, engine="python", encoding="utf-8", errors="ignore")
+
+    df = raw.iloc[start_row:].copy()
+    df.reset_index(drop=True, inplace=True)
+
+    df.columns = [
+        "Sensor", "Timestamp", "X3", "T1", "T2", "T3", "Size",
+        "Humidity", "Battery", "X"
+    ]
+
+    df["Timestamp"] = df["Timestamp"].apply(convert_to_eastern)
+    df.sort_values("Timestamp", inplace=True)
+
+    if df["Size"].dtype != float and df["Size"].dtype != int:
+        df["Size"] = pd.to_numeric(df["Size"], errors="coerce")
+
+    rollover_points = df[df["Size"] == 8890].index.tolist()
+
+    if rollover_points:
+        last_8890_index = rollover_points[-1]
+        baseline = 8890
+        df.loc[last_8890_index + 1:, "Size"] += baseline
+
+    return df
+
+# -----------------------------
+# Process DBH Raw Folder
+# -----------------------------
+def process_dbh_folder(folder):
+    all_data = []
+
+    for file in os.listdir(folder):
+        if not file.lower().endswith(".csv"):
             continue
-        sensor_id = int(m.group(1))
 
-        # df = pd.read_csv(path, header=None, sep=sep, engine='python')
-        df = pd.read_csv(path, header=None, sep=sep, engine='python', encoding='latin1')
-        if df.shape[1] <= max(metrics.values()):
-            if verbose: print(f"⚠️  {fname} only has {df.shape[1]} cols—skipping")
-            continue
+        full_path = os.path.join(folder, file)
+        print(f"Processing DBH: {file}")
 
-        summary = {'sensor_id': sensor_id}
-        for col_name, idx in metrics.items():
-            summary[col_name] = df.iloc[:, idx].mean()
-        records.append(summary)
+        df = compute_dbh_df(full_path)
+        sensor_id = Path(file).stem.split("_")[0]
+        df["Sensor_ID"] = sensor_id
+        all_data.append(df)
 
-    if verbose:
-        print(f"  • scanned {len(paths)} files, produced {len(records)} summaries")
-    return pd.DataFrame(records)
+    if not all_data:
+        print("No DBH files found.")
+        return None
 
+    combined = pd.concat(all_data, ignore_index=True)
 
-def daily_summary(data_dir, metrics, sep=';', verbose=True):
-    """
-    Compute daily mean metrics per sensor.
-    Returns DataFrame: sensor_id, date, <metrics>
-    """
-    dfs = []
-    pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
-    paths = glob.glob(os.path.join(data_dir, "data_*.csv"))
+    daily = combined.groupby(["Sensor_ID", combined["Timestamp"].dt.date]).agg(
+        Min_Size=("Size", "min"),
+        Max_Size=("Size", "max")
+    ).reset_index()
 
-    for path in paths:
-        fname = os.path.basename(path)
-        m = pattern.match(fname)
-        if not m:
-            if verbose: print(f"⚠️  skipping unexpected filename: {fname}")
-            continue
-        sensor_id = int(m.group(1))
+    daily["Growth_mm"] = daily["Max_Size"] - daily["Min_Size"]
+    daily["Growth_cm"] = daily["Growth_mm"] / 10.0
 
-        # df = pd.read_csv(path, header=None, sep=sep, engine='python')
-        df = pd.read_csv(path, header=None, sep=sep, engine='python', encoding='latin1')
-        if df.shape[1] <= max(metrics.values()) or df.shape[1] <= 1:
-            if verbose: print(f"⚠️  {fname} only has {df.shape[1]} cols—skipping")
-            continue
+    out_path = os.path.join(SUMMARIES_FOLDER, "dbh_summary.csv")
+    daily.to_csv(out_path, index=False, encoding="utf-8")
 
-        data = df.iloc[:, [1] + list(metrics.values())].copy()
-        data.columns = ['timestamp'] + list(metrics.keys())
-        data['sensor_id'] = sensor_id
-        dfs.append(data)
+    print("DBH summary generated:", out_path)
 
-    if not dfs:
-        return pd.DataFrame()
-
-    all_data = pd.concat(dfs, ignore_index=True)
-    all_data['timestamp'] = pd.to_datetime(
-        all_data['timestamp'], format="%Y.%m.%d %H:%M", errors='coerce'
-    )
-    all_data['date'] = all_data['timestamp'].dt.date
-
-    daily = (
-        all_data
-        .groupby(['sensor_id','date'])[list(metrics.keys())]
-        .mean()
-        .reset_index()
-    )
-    if verbose:
-        print(f"  • aggregated to {len(daily)} daily rows")
     return daily
 
-def compute_dbh_df(dendro_dir, start_dbh_path, sep=';', verbose=True):
-    """
-    Returns DataFrame with columns: sensor_id, start_DBH, end_DBH, dbh_diff
-    """
-    dbh_df = pd.read_csv(start_dbh_path)
-    if 'ID' not in dbh_df.columns or 'start_DBH' not in dbh_df.columns:
-        raise ValueError("START_DBH_CSV must have columns ID and start_DBH")
-    records = []
-    pattern = re.compile(r"data_(\d+)_\d{4}_\d{2}_\d{2}_\d+\.csv")
-    for path in glob.glob(os.path.join(dendro_dir, "data_*.csv")):
-        fname = os.path.basename(path)
-        m = pattern.match(fname)
-        if not m:
-            continue
-        sid = int(m.group(1))
-        raw = pd.read_csv(path, header=None, sep=sep, engine='python')
-        if raw.empty or raw.shape[1] < 7:
-            continue
-        last_size = float(raw.iloc[-1, 6])
-        start_val = float(dbh_df.loc[dbh_df['ID'] == sid, 'start_DBH'].iloc[0])
-        end_val = start_val + (last_size / 10000) * 2
-        dbh_diff = end_val - start_val
-        records.append({
-            'sensor_id': sid,
-            'start_DBH': round(start_val, 2),
-            'end_DBH': round(end_val, 2),
-            'dbh_diff': round(dbh_diff, 2)
-        })
-    if verbose:
-        print(f"  • computed DBH for {len(records)} sensors")
-    return pd.DataFrame(records)
+# -----------------------------
+# Metadata Join
+# -----------------------------
+def join_metadata():
+    try:
+        df_meta_d = pd.read_csv(JOINED_DENDRO_CSV, encoding='latin1')
+    except UnicodeDecodeError:
+        df_meta_d = pd.read_csv(JOINED_DENDRO_CSV, encoding="utf-8", errors="ignore")
 
-# ─── DENDROMETER OVERALL ───────────────────────────────────────────────────────
+    try:
+        df_meta_t = pd.read_csv(JOINED_TMS_CSV, encoding='latin1')
+    except UnicodeDecodeError:
+        df_meta_t = pd.read_csv(JOINED_TMS_CSV, encoding="utf-8", errors="ignore")
 
-print("🔄 Summarizing dendrometer data…")
-dendro_metrics = {'avg_air_temp': 3, 'avg_growth': 6}
+    return df_meta_d, df_meta_t
 
-df_dendro_sum = summarize_folder(DENDRO_DATA_DIR, dendro_metrics)
-
-print(f"🔄 Reading metadata from {JOINED_DENDRO_CSV}")
-df_meta_d = pd.read_csv(JOINED_DENDRO_CSV)
-
-print("🔄 Merging summaries into metadata")
-df_dendro_out = df_meta_d.merge(df_dendro_sum, on='sensor_id', how='left')
-
-print(f"🔄 Writing output to {OUTPUT_DENDRO}")
-df_dendro_out.to_csv(OUTPUT_DENDRO, index=False)
-
-# ─── DENDROMETER DAILY ─────────────────────────────────────────────────────────
-
-print("🔄 Building daily dendrometer summaries…")
-dendro_daily = daily_summary(DENDRO_DATA_DIR, dendro_metrics)
-meta_sel = df_meta_d[['sensor_id','X','Y','Common_Name']]
-df_dendro_daily = dendro_daily.merge(meta_sel, on='sensor_id', how='left')
-
-print(f"🔄 Writing output to {OUTPUT_DENDRO_DAILY}")
-df_dendro_daily.to_csv(OUTPUT_DENDRO_DAILY, index=False)
-
-# ─── TMS OVERALL ───────────────────────────────────────────────────────────────
-
-print("🔄 Summarizing TMS data…")
-tms_metrics = {'avg_t1':3,'avg_t2':4,'avg_t3':5,'avg_moist':6}
-
-df_tms_sum = summarize_folder(TMS_DATA_DIR, tms_metrics)
-
-print(f"🔄 Reading metadata from {JOINED_TMS_CSV}")
-df_meta_t = pd.read_csv(JOINED_TMS_CSV)
-
-print("🔄 Merging TMS summaries into metadata")
-df_tms_out = df_meta_t.merge(df_tms_sum, on='sensor_id', how='left')
-
-print(f"🔄 Writing output to {OUTPUT_TMS}")
-df_tms_out.to_csv(OUTPUT_TMS, index=False)
-
-# ─── TMS DAILY ─────────────────────────────────────────────────────────────────
-
-print("🔄 Building daily TMS summaries…")
-tms_daily = daily_summary(TMS_DATA_DIR, tms_metrics)
-meta_sel_t = df_meta_t[['sensor_id','X','Y','Common_Name']]
-df_tms_daily = tms_daily.merge(meta_sel_t, on='sensor_id', how='left')
-
-print(f"🔄 Writing output to {OUTPUT_TMS_DAILY}")
-df_tms_daily.to_csv(OUTPUT_TMS_DAILY, index=False)
-
-# ─── DBH DIFFERENCE ───────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("🔄 Computing DBH raw values...")
-    df_dbh = compute_dbh_df(DENDRO_DATA_DIR, START_DBH_CSV)
-    df_dbh.to_csv(OUTPUT_DBH_DF, index=False)
-    print(f"  • wrote raw DBH to {OUTPUT_DBH_DF}")
-    
-    # Merge DBH with metadata
-    df_dbh_merged = df_meta_d.merge(df_dbh, on='sensor_id', how='left')
-    df_dbh_merged.to_csv(OUTPUT_DBH_MERGED, index=False)
-    print(f"🔄 Merging DBH difference to {OUTPUT_DBH_MERGED}")
+    os.makedirs(SUMMARIES_FOLDER, exist_ok=True)
 
-    print("✅ All is done! :)")
+    print("Generating climate summaries...")
+    summarize_folder(EXTRACT_FOLDER, SUMMARIES_FOLDER)
+
+    print("Processing DBH corrections...")
+    process_dbh_folder(DBH_STATIC_FOLDER)
+
+    print("Joining metadata...")
+    df_meta_d, df_meta_t = join_metadata()
+
+    print("✅ All tasks complete.")
