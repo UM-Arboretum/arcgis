@@ -17,20 +17,21 @@ import pandas as pd
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 
-DENDRO_DATA_DIR        = "Dendrometer_Data"
-TMS_DATA_DIR           = "TMS_Data"
+ROOT_DIR = os.path.dirname(os.path.dirname(__file__))  # parent of Scripts/
+DENDRO_DATA_DIR = os.path.join(ROOT_DIR, "Dendrometer_Data")
+TMS_DATA_DIR    = os.path.join(ROOT_DIR, "TMS_Data")
 
-JOINED_DENDRO_CSV      = "JOINED.DENDROMETER.csv"
-JOINED_TMS_CSV         = "JOINED.TMS.csv"
+JOINED_DENDRO_CSV = os.path.join(ROOT_DIR, "JOINED.DENDROMETER.csv")
+JOINED_TMS_CSV   = os.path.join(ROOT_DIR, "JOINED.TMS.csv")
 
-OUTPUT_DENDRO          = "Dendrometer_Average.csv"
-OUTPUT_TMS             = "TMS_Average.csv"
-OUTPUT_DENDRO_DAILY    = "Dendrometer_Daily.csv"
-OUTPUT_TMS_DAILY       = "TMS_Daily.csv"
+START_DBH_CSV     = os.path.join(ROOT_DIR, "Dendrometer_Start_DBH.csv")
 
-START_DBH_CSV          = "Dendrometer_Start_DBH.csv"
-OUTPUT_DBH_DF          = "Dendrometer_DBH_Raw.csv"       
-OUTPUT_DBH_MERGED      = "Dendrometer_DBH_Difference.csv"
+OUTPUT_DENDRO      = os.path.join(ROOT_DIR, "Dendrometer_Average.csv")
+OUTPUT_TMS         = os.path.join(ROOT_DIR, "TMS_Average.csv")
+OUTPUT_DENDRO_DAILY= os.path.join(ROOT_DIR, "Dendrometer_Daily.csv")
+OUTPUT_TMS_DAILY   = os.path.join(ROOT_DIR, "TMS_Daily.csv")
+OUTPUT_DBH_DF      = os.path.join(ROOT_DIR, "Dendrometer_DBH_Raw.csv")
+OUTPUT_DBH_MERGED  = os.path.join(ROOT_DIR, "Dendrometer_DBH_Difference.csv")
 
 
 # ─── HELPERS ───────────────────────────────────────────────────────────────────
